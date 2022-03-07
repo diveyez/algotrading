@@ -66,18 +66,16 @@ def is_time_to_exit(data,
     # if count == 0:
     #    return True
 
-    if stop in [1, 3]:
-        if stop_loss(data.Last.iloc[-1],
-                     bought_at,
-                     percentage=var.stop_loss_prcnt):
-            log.debug("[FUNC] Stop-loss")
-            return True
-    if stop in [2, 3]:
-        if trailing_stop_loss(data.Last.iloc[-1],
-                              max_price,
-                              percentage=var.trailing_loss_prcnt):
-            log.debug("[FUNC] Trailing stop-loss")
-            return True
+    if stop in [1, 3] and stop_loss(
+        data.Last.iloc[-1], bought_at, percentage=var.stop_loss_prcnt
+    ):
+        log.debug("[FUNC] Stop-loss")
+        return True
+    if stop in [2, 3] and trailing_stop_loss(
+        data.Last.iloc[-1], max_price, percentage=var.trailing_loss_prcnt
+    ):
+        log.debug("[FUNC] Trailing stop-loss")
+        return True
 
     for func in funcs:
         if func(data, smas=smas, emas=emas):
@@ -197,22 +195,7 @@ def tick_by_tick(market,
     for i in range(len(data)-110):
         start_time = time()
         # print(data_init.Last.iloc[i])
-        if not aux_buy:
-            if is_time_to_buy(data[i:i+110], entry_funcs, smas, emas):
-
-                buy_price = data_init.Ask.iloc[i + 109 + date[0]]
-                high_price = buy_price
-
-                entry_points_x.append(i + 109)
-                entry_points_y.append(data_init.Ask.iloc[i + 109 + date[0]])
-
-                if exit_funcs:
-                    aux_buy = True
-
-                log.info(f'''{data_init.time.iloc[i + 109 + date[0]]} \
-                     [BUY] @ {data_init.Ask.iloc[i + 109 + date[0]]}''')
-
-        else:
+        if aux_buy:
             # Used for trailing stop loss.
             if data_init.Last.iloc[i + 109 + date[0]] > high_price:
                 high_price = data_init.Last.iloc[i + 109 + date[0]]
@@ -238,6 +221,20 @@ def tick_by_tick(market,
                      [SELL]@ {data_init.Bid.iloc[i + 109 + date[0]]}''')
 
                 log.info(f'[P&L] > {total}%.')
+
+        elif is_time_to_buy(data[i:i+110], entry_funcs, smas, emas):
+
+            buy_price = data_init.Ask.iloc[i + 109 + date[0]]
+            high_price = buy_price
+
+            entry_points_x.append(i + 109)
+            entry_points_y.append(data_init.Ask.iloc[i + 109 + date[0]])
+
+            if exit_funcs:
+                aux_buy = True
+
+            log.info(f'''{data_init.time.iloc[i + 109 + date[0]]} \
+                     [BUY] @ {data_init.Ask.iloc[i + 109 + date[0]]}''')
 
         # plt.plot(data.Last.iloc[i:i+50])
         # plt.draw()
@@ -361,9 +358,8 @@ def realtime(exchanges,
             global_market_name = str(market['MarketName'])
 
             # Check if it's on of the trading pairs.
-            if len(trading_markets) > 0:
-                if market_name not in trading_markets:
-                    continue
+            if len(trading_markets) > 0 and market_name not in trading_markets:
+                continue
 
             # Checks if pair is included in main coins.
             if (market_name.startswith('BT_') and market_name.split('-')[0] in main_coins) or \
@@ -413,7 +409,13 @@ def realtime(exchanges,
                                        count=portfolio[market_name]['count'],
                                        stop=var.stop_type):
 
-                        if not simulation:
+                        if simulation:
+                            log.info(f'[SELL] {global_market_name} @ {data.Bid.iloc[-1]}')
+
+                            res = ((data.Bid.iloc[-1] - portfolio[market_name]['bought_at']) /
+                                   portfolio[market_name]['bought_at'])*100
+
+                        else:
                             # Binance market
                             if market_name.startswith('BN_'):
                                 # Market Sell
@@ -449,13 +451,6 @@ def realtime(exchanges,
                             res = ((sold_at - portfolio[market_name]['bought_at']) /
                                    portfolio[market_name]['bought_at'])*100
 
-                        # SIMULATION
-                        else:
-                            log.info(f'[SELL] {global_market_name} @ {data.Bid.iloc[-1]}')
-
-                            res = ((data.Bid.iloc[-1] - portfolio[market_name]['bought_at']) /
-                                   portfolio[market_name]['bought_at'])*100
-
                         if var.commission:
                             res -= var.bnb_commission
                         log.info(f'[P&L] {global_market_name} > {res:.2f}%')
@@ -478,55 +473,50 @@ def realtime(exchanges,
                         del portfolio[market_name]
                         coins.pop(market_name)
 
-                    # If it's not time to exit, increment count.
                     else:
                         portfolio[market_name]['count'] += 1
 
-                # If the coin is not on portfolio, checks if it's time to buy.
-                else:
-                    if is_time_to_buy(data, entry_funcs, smas):
-                        # REAL
-                        if not simulation:
-                            # Binance
-                            if market_name.startswith('BN_'):
-                                # Limit buy
-                                # success, msg = bnb.buy(market, data.Ask.iloc[-1]*1.01)
-                                # Market buy
-                                success, ret = bnb.buy(market_name.replace('BN_', ''))
+                elif is_time_to_buy(data, entry_funcs, smas):
+                    if simulation:
+                        portfolio[market_name] = {
+                            'bought_at': data.Ask.iloc[-1],
+                            'max_price': data.Ask.iloc[-1],
+                            'quantity': 1,
+                            'count': 0
+                        }
+                        log.info(f'[BUY] {global_market_name} @ {data.Ask.iloc[-1]}')
 
-                            # Bittrex
-                            elif market_name.startswith('BT_'):
-                                success, ret = bt.buy(market_name.replace('BT_', ''), data.Ask.iloc[-1]*1.01)
+                    else:
+                        # Binance
+                        if market_name.startswith('BN_'):
+                            # Limit buy
+                            # success, msg = bnb.buy(market, data.Ask.iloc[-1]*1.01)
+                            # Market buy
+                            success, ret = bnb.buy(market_name.replace('BN_', ''))
 
-                            if success:
-                                # TODO - Implement portfolio for Bittrex
-                                portfolio[market_name] = {
-                                    'bought_at': float(ret['fills'][0]['price']),
-                                    'max_price': float(ret['fills'][0]['price']),
-                                    'quantity': float(ret['executedQty']),
-                                    'count': 0}
+                        # Bittrex
+                        elif market_name.startswith('BT_'):
+                            success, ret = bt.buy(market_name.replace('BT_', ''), data.Ask.iloc[-1]*1.01)
 
-                                log.info(f"[BUY] {global_market_name} @ {portfolio[market_name]['bought_at']}")
-                                if var.desktop_info:
-                                    desktop_notification({
-                                        'type':    'buy',
-                                        'title':   global_market_name,
-                                        'message': f"Buy @ {portfolio[market_name]['bought_at']}"
-                                    })
-
-                            elif 'error' in ret:
-                                log.info(f"[ERROR] Unable to buy {global_market_name} @ {data.Ask.iloc[-1]}")
-                                log.info(f"       [MSG] {ret['error']}")
-
-                        # SIMULATION
-                        else:
+                        if success:
+                            # TODO - Implement portfolio for Bittrex
                             portfolio[market_name] = {
-                                'bought_at': data.Ask.iloc[-1],
-                                'max_price': data.Ask.iloc[-1],
-                                'quantity': 1,
-                                'count': 0
-                            }
-                            log.info(f'[BUY] {global_market_name} @ {data.Ask.iloc[-1]}')
+                                'bought_at': float(ret['fills'][0]['price']),
+                                'max_price': float(ret['fills'][0]['price']),
+                                'quantity': float(ret['executedQty']),
+                                'count': 0}
+
+                            log.info(f"[BUY] {global_market_name} @ {portfolio[market_name]['bought_at']}")
+                            if var.desktop_info:
+                                desktop_notification({
+                                    'type':    'buy',
+                                    'title':   global_market_name,
+                                    'message': f"Buy @ {portfolio[market_name]['bought_at']}"
+                                })
+
+                        elif 'error' in ret:
+                            log.info(f"[ERROR] Unable to buy {global_market_name} @ {data.Ask.iloc[-1]}")
+                            log.info(f"       [MSG] {ret['error']}")
 
         del markets
         markets = []
@@ -613,7 +603,7 @@ def backtest(markets,
     if from_file:
         markets = manage_files(markets, interval=interval)
 
-    log.debug(f"{str(len(markets))} files/chunks to analyse...")
+    log.debug(f"{len(markets)} files/chunks to analyse...")
 
     # Create a multiprocessing Pool
     pool = Pool(num_processors(mp_level))

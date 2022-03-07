@@ -59,7 +59,7 @@ class Bittrex(object):
         request_url = (BASE_URL % method_set) + method + '?'
 
         if method_set != 'public':
-            request_url += 'apikey=' + self.api_key + "&nonce=" + nonce + '&'
+            request_url += f'apikey={self.api_key}&nonce={nonce}&'
 
         request_url += urlencode(options)
 
