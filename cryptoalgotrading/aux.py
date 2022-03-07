@@ -154,13 +154,11 @@ def get_markets_on_files(interval, base='BTC'):
     Returns:
     - list of markets.
     """
-    markets_list = []
-
-    for file_ in listdir(f"{var.data_dir}/hist-{interval}"):
-        if file_.startswith(base):
-            markets_list.append(file_.split('.')[0])
-
-    return markets_list
+    return [
+        file_.split('.')[0]
+        for file_ in listdir(f"{var.data_dir}/hist-{interval}")
+        if file_.startswith(base)
+    ]
 
 
 # @dropnan
@@ -186,11 +184,7 @@ def get_historical_data(market,
     """
     verified_market = check_market_name(market, exchange)
 
-    if not init_date:
-        init_date = '2018-02-02 00:00:00'
-    else:
-        init_date = get_time_right(init_date)
-
+    init_date = get_time_right(init_date) if init_date else '2018-02-02 00:00:00'
     time = "time > \'" + init_date + "\'"
 
     if end_date:
@@ -198,7 +192,18 @@ def get_historical_data(market,
         time += " AND time < \'" + end_date + "\'"
 
     # Gets data from Bittrex exchange.
-    if exchange == 'bittrex':
+    if exchange == 'binance':
+        command = "SELECT last(Last) AS Last," + \
+                  " last(BaseVolume) AS BaseVolume," + \
+                  " last(High) AS High," + \
+                  " last(Low) AS Low," + \
+                  " last(Ask) AS Ask," + \
+                  " last(Bid) AS Bid " + \
+                  "FROM binance WHERE " + time + \
+                  " AND MarketName='" + verified_market + \
+                  "' GROUP BY time(" + interval + ")"
+
+    elif exchange == 'bittrex':
         command = "SELECT last(Last) AS Last," + \
                   " last(BaseVolume) AS BaseVolume," + \
                   " last(High) AS High," + \
@@ -208,18 +213,6 @@ def get_historical_data(market,
                   " last(OpenBuyOrders) AS OpenBuy," + \
                   " last(OpenSellOrders) AS OpenSell " + \
                   "FROM bittrex WHERE " + time + \
-                  " AND MarketName='" + verified_market + \
-                  "' GROUP BY time(" + interval + ")"
-
-    # Gets data from Binance exchange.
-    elif exchange == 'binance':
-        command = "SELECT last(Last) AS Last," + \
-                  " last(BaseVolume) AS BaseVolume," + \
-                  " last(High) AS High," + \
-                  " last(Low) AS Low," + \
-                  " last(Ask) AS Ask," + \
-                  " last(Bid) AS Bid " + \
-                  "FROM binance WHERE " + time + \
                   " AND MarketName='" + verified_market + \
                   "' GROUP BY time(" + interval + ")"
 
@@ -276,7 +269,7 @@ def detect_init(data):
     for i in range(len(data)):
         # TODO remove numpy lib and use other method to detect NaN.
         if not isnan(data.Last.iloc[i]):
-            return data[i:len(data)]
+            return data[i:]
 
 
 def plot_data(data,
@@ -299,9 +292,8 @@ def plot_data(data,
     # For when it's called outside backtest.
     if date is None:
         date = [0, 0]
-    if date != [0, 0]:
-        if len(data) != date[1] - date[0]:
-            data = data[date[0]:date[1]]
+    if date != [0, 0] and len(data) != date[1] - date[0]:
+        data = data[date[0]:date[1]]
 
     f, (ax1, ax2, ax3) = plt.subplots(3,
                                       sharex='all',
@@ -313,11 +305,7 @@ def plot_data(data,
     ax3.grid(True)
 
     # var date is causing conflicts. using name date.
-    if date[1] == 0:
-        end_date = len(data)
-    else:
-        end_date = date[1]
-
+    end_date = len(data) if date[1] == 0 else date[1]
     x = range(date[0], end_date)
     ax1.plot(x, data.Last, color='black', linewidth=1, alpha=0.65)
 
@@ -365,7 +353,7 @@ def plot_data(data,
     f.subplots_adjust(hspace=0)
     if to_file:
         if not name:
-            name = 'fig_test' + str(time())
+            name = f'fig_test{str(time())}'
         f.savefig(f"{var.fig_dir}{name}-{str(time())}.pdf", bbox_inches='tight')
         plt.close(f)
 
@@ -483,13 +471,12 @@ def check_market_name(market,
     """
     market = market.upper()
 
-    if exchange == 'bittrex':
+    if exchange == 'binance':  # and len(market) > 5:
+        return market
+    elif exchange == 'bittrex':
         if '-' in market:  # and len(market) > 5:
             return market
         return 'BTC-' + market
-
-    elif exchange == 'binance':
-        return market
 
 
 def time_to_index(data, _datetime):
@@ -526,11 +513,22 @@ def time_to_index(data, _datetime):
 
         t_hour, t_minute = t_time.split(':')
 
-        dtime.append(str(t_year) + '-' +
-                     str(t_month) + '-' +
-                     str(t_day) + 'T' +
-                     str(t_hour) + ':' +
-                     str(t_minute) + ':00Z')
+        dtime.append(
+            (
+                (
+                    (
+                        ((f'{str(t_year)}-' + str(t_month)) + '-')
+                        + str(t_day)
+                        + 'T'
+                    )
+                    + str(t_hour)
+                    + ':'
+                )
+                + str(t_minute)
+                + ':00Z'
+            )
+        )
+
 
     try:
         d = data[(data.time > dtime[0]) & (data.time < dtime[1])]
@@ -585,10 +583,7 @@ def trailing_stop_loss(last,
     Returns true when triggered.
     """
 
-    if last <= higher * (1 - (percentage * 0.01)):
-        return True
-
-    return False
+    return last <= higher * (1 - (percentage * 0.01))
 
 
 def stop_loss(last,
@@ -604,10 +599,7 @@ def stop_loss(last,
     Returns true when triggered.
     """
 
-    if last <= entry_point_x * (1 - (percentage * 0.01)):
-        return True
-
-    return False
+    return last <= entry_point_x * (1 - (percentage * 0.01))
 
 
 def num_processors(level="medium"):
@@ -628,7 +620,7 @@ def num_processors(level="medium"):
         n_threads = 1
     elif level == "high":
         n_threads = mp - 1
-    elif level == "extreme" or level == "max":
+    elif level in ["extreme", "max"]:
         n_threads = mp
     elif isinstance(level, int) and 0 < level <= mp:
         n_threads = level
@@ -661,13 +653,8 @@ def desktop_notification(content: dict):
 
     icon = ''
 
-    if var.desktop_cool_mode:
-        if content['type'] == 'P&L':
-            if content['profit'] > 0:
-                icon = var.img_profit
-            else:
-                icon = var.img_loss
-
+    if var.desktop_cool_mode and content['type'] == 'P&L':
+        icon = var.img_profit if content['profit'] > 0 else var.img_loss
     notification.notify(
         title = content['title'],
         message = content['message'],
@@ -682,20 +669,16 @@ def manage_files(markets, interval='1m'):
     Manage market files in order to improve framework performance.
     """
     all_files = []
-    markets_name = []
-
-    for market in markets:
-        markets_name.append(check_market_name(market))
+    markets_name = [check_market_name(market) for market in markets]
 
     if not path.isdir(f"{var.data_dir}/hist-{interval}"):
         log.error(f"{var.data_dir}/hist-{interval} doesn't exist.")
         sys.exit(1)
 
     for f in listdir(f"{var.data_dir}/hist-{interval}"):
-        for market in markets_name:
-            if f.startswith(market):
-                all_files.append(f.split('.')[0])
-                continue
+        all_files.extend(
+            f.split('.')[0] for market in markets_name if f.startswith(market)
+        )
 
     return all_files
 
@@ -705,18 +688,13 @@ def file_lines(filename):
     Counts the number of lines in a file
     """
 
-    f = open(filename)
-    lines = 0
-    buf_size = 1024 * 1024
-    read_f = f.read  # loop optimization
+    with open(filename) as f:
+        lines = 0
+        buf_size = 1024 * 1024
+        read_f = f.read  # loop optimization
 
-    buf = read_f(buf_size)
-    while buf:
-        lines += buf.count('\n')
-        buf = read_f(buf_size)
-
-    f.close()
-
+        while buf := read_f(buf_size):
+            lines += buf.count('\n')
     return lines
 
 
@@ -725,7 +703,7 @@ def binance2btrx(_data):
     Converts Binance data structure into Bittrex model.
     """
 
-    new_data = {'MarketName': str(_data['symbol']),
+    return {'MarketName': str(_data['symbol']),
                 'Ask': float(_data['askPrice']),
                 'BaseVolume': float(_data['quoteVolume']),
                 'Bid': float(_data['bidPrice']),
@@ -734,8 +712,6 @@ def binance2btrx(_data):
                 'Low': float(_data['lowPrice']),
                 'Volume': float(_data['volume']),
                 'Count': float(_data['count'])}
-
-    return new_data
 
 
 def run_command(cmd):

@@ -7,6 +7,7 @@ It is important to define some environment variables before use this
 framework, if user wants to use DB and Exchanges' credentials.
 """
 
+
 from os import getenv, getcwd
 
 
@@ -20,7 +21,7 @@ db_name = getenv('DB_NAME') or "bd"
 data_dir = getenv('DATA_DIR') or "."
 logs_dir = getenv('LOGS_DIR') or "."
 
-LOG_FILENAME = logs_dir + '/indicators.log'
+LOG_FILENAME = f'{logs_dir}/indicators.log'
 
 fig_dir = "figs/"
 

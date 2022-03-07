@@ -19,10 +19,11 @@ class Bittrex:
         # risk represents percentage of money bot could use each time it buy coins.
         self.risk = var.risk
         # available balances.
-        self.available = {}
-        for i in self.conn.get_balances()["result"]:
-            if i["Available"] > 0:
-                self.available[i["Currency"]] = i["Available"]
+        self.available = {
+            i["Currency"]: i["Available"]
+            for i in self.conn.get_balances()["result"]
+            if i["Available"] > 0
+        }
 
     def get_all_balances(self):
         # parser do get_balances
@@ -41,38 +42,30 @@ class Bittrex:
         :return: tuple with info about the purchase
         """
         # Verify if has sufficient funds.
-        if self.available[coin.split('-')[0]] > self.min_limit:
-
-            # Calculate the amount of 'coin' to buy, based on rate and risk.
-            to_spend = self.available[coin.split('-')[0]] * self.risk
-
-            # Buy_limit
-            res = self.conn.buy_limit(coin, rate/to_spend, rate)
-
-            # Checks if the transaction is complete.
-            if res["success"]:
-                # REMOVE SLEEP
-                time.sleep(1)
-                order = self.conn.get_order(res["result"]["uuid"])
-
-                # If order is open means the transaction didn't occur
-                # and is necessary to cancel it.
-                if order["result"]["IsOpen"]:
-                    cancel = self.conn.cancel(res["result"]["uuid"])
-                    # Couldn't buy at desired rate.
-                    return False, cancel["message"]
-
-                else:
-                    # Returns True and price payed for coin.
-                    return True, [order["result"]["PricePerUnit"], order["result"]["Quantity"]]
-
-            else:
-                # Buy_limit didn't went as predicted.
-                return False, res["message"]
-
-        else:
+        if self.available[coin.split('-')[0]] <= self.min_limit:
             # Insufficient funds.
             return False, "Cash under Minimum limit."
+        # Calculate the amount of 'coin' to buy, based on rate and risk.
+        to_spend = self.available[coin.split('-')[0]] * self.risk
+
+        # Buy_limit
+        res = self.conn.buy_limit(coin, rate/to_spend, rate)
+
+        if not res["success"]:
+            # Buy_limit didn't went as predicted.
+            return False, res["message"]
+
+        # REMOVE SLEEP
+        time.sleep(1)
+        order = self.conn.get_order(res["result"]["uuid"])
+
+        if not order["result"]["IsOpen"]:
+            # Returns True and price payed for coin.
+            return True, [order["result"]["PricePerUnit"], order["result"]["Quantity"]]
+
+        cancel = self.conn.cancel(res["result"]["uuid"])
+        # Couldn't buy at desired rate.
+        return False, cancel["message"]
 
     def sell(self, coin, quantity, rate):
 
@@ -128,10 +121,7 @@ class Binance:
         if not coins:
             return self.assets
         elif isinstance(coins, list):
-            tmp_dict = {}
-            for coin in coins:
-                tmp_dict[coin] = self.assets[coin]
-            return tmp_dict
+            return {coin: self.assets[coin] for coin in coins}
         else:
             return self.assets[coins]
 
@@ -164,26 +154,19 @@ class Binance:
         if quantity_to_buy > self.assets[currency]['available']:
             return False, {'error': 'Portfolio has no space for new assets'}
 
-        # Market buy - not recommended.
-        # Can end up buying much higher than expected during a pump.
-        if not price:
-            try:
+        try:
+            if not price:
                 buy_order = self.conn.order_market_buy(symbol=coin,
                                                        quoteOrderQty=round(quantity_to_buy,
                                                                            self.coin_precision[currency])
                                                        )
-            except Exception as e:
-                return False, {'error': e}
-
-        # Limit Order - Buys at an expected price.
-        else:
-            try:
+            else:
                 buy_order = self.conn.order_limit_buy(symbol=coin,
                                                       price=price,
                                                       quantity=round(quantity_to_buy/price,
                                                                      self.coin_precision[currency]))
-            except Exception as e:
-                return False, {'error': e}
+        except Exception as e:
+            return False, {'error': e}
 
         # Tests buy
         if buy_order['status'] == 'FILLED':
